@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Arithmetic Expression Evaluator — AST + TAC + Stack</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <style>
+    :root {
+      --bg: #f7f7fb;
+      --panel: #ffffff;
+      --text: #0f172a;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --accent-2: #14b8a6;
+      --border: #e5e7eb;
+      --node-op: #bfdbfe;
+      --node-lit: #bbf7d0;
+      --node-stroke: #1f2937;
+      --node-text: #0f172a;
+      --link: #aaaaaa;
+      --chip: #eef2ff;
+      --active: #f59e0b;
+    }
+    body.dark {
+      --bg: #0b1020;
+      --panel: #0f172a;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #60a5fa;
+      --accent-2: #34d399;
+      --border: #1f2937;
+      --node-op: #1d4ed8;
+      --node-lit: #065f46;
+      --node-stroke: #94a3b8;
+      --node-text: #f8fafc;
+      --link: #475569;
+      --chip: #1f2937;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      position: sticky; top: 0; z-index: 10;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px;
+    }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .title { font-weight: 700; }
+
+    input[type="text"] {
+      flex: 1 1 360px; min-width: 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font-size: 14px;
+    }
+    button {
+      padding: 8px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.ghost { background: transparent; }
+
+    main {
+      display: grid;
+      grid-template-columns: 320px 1fr 320px;
+      gap: 12px;
+      padding: 12px;
+    }
+    aside, section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      min-width: 0;
+    }
+    aside.history-col { display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+    .aside-header, .aside-footer {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .aside-footer { border-bottom: none; border-top: 1px solid var(--border); }
+    .history { overflow: auto; max-height: calc(100vh - 220px); }
+    .history-item { padding: 10px; border-bottom: 1px solid var(--border); cursor: pointer; word-break: break-all; }
+    .history-item:hover { background: var(--chip); }
+
+    .chip {
+      background: var(--chip);
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .chip:empty { display: none; }
+    .toolbar {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    }
+    .result {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    #status.error { color: #dc2626; }
+    #load-error { display: none; background: #fee2e2; color: #991b1b; padding: 10px 12px; font-size: 14px; border-bottom: 1px solid #fca5a5; }
+
+    #ast-graph { width: 100%; height: calc(100vh - 300px); min-height: 360px; position: relative; }
+    #ast-graph svg { display: block; cursor: grab; }
+    .link { stroke: var(--link); stroke-width: 2px; }
+    .node circle { stroke: var(--node-stroke); stroke-width: 1.2px; fill-opacity: 0.95; }
+    .node text { font-weight: 600; fill: var(--node-text); }
+    .highlight circle { stroke: var(--active) !important; stroke-width: 3px !important; }
+
+    .legend {
+      position: absolute; right: 8px; top: 8px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    #details-list {
+      position: absolute; left: 12px; bottom: 12px;
+      padding: 8px; margin: 0;
+      list-style: none;
+      border-radius: 8px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+      font-size: 13px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      max-width: 260px;
+    }
+
+    /* Right column panels */
+    .right-col { display: flex; flex-direction: column; gap: 12px; padding: 10px; }
+    .panel { padding: 10px; min-height: 220px; display: flex; flex-direction: column; gap: 8px; }
+    .panel h4 { margin: 0 0 6px 0; }
+    .tac-list {
+      overflow: auto; max-height: 40vh;
+      border-top: 1px dashed var(--border);
+      padding-top: 8px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .tac-item {
+      padding: 6px 8px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--chip) 80%, transparent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      border: 1px solid transparent;
+    }
+    .stack {
+      border-top: 1px dashed var(--border);
+      padding-top: 8px;
+      display: flex; flex-direction: column; gap: 6px;
+      max-height: 40vh; overflow: auto;
+    }
+    .stack-item {
+      padding: 8px;
+      border-radius: 8px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    .stack-item:first-child { border-color: var(--accent-2); }
+    .empty { color: var(--muted); font-size: 13px; }
+
+    /* Smaller screens: stack the three columns */
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 1fr; }
+      .history { max-height: 220px; }
+      #ast-graph { height: 60vh; }
+    }
+  </style>
+</head>
+<body>
+  <div id="load-error"></div>
+  <header>
+    <div class="row">
+      <div class="title">Arithmetic Expression Evaluator — <span class="chip">AST + TAC + Stack</span></div>
+      <div style="flex:1"></div>
+      <button id="themeBtn" class="ghost" title="Toggle theme">🌓 Theme</button>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <input id="expression" type="text" placeholder="Type expression, e.g. (3 + 5) * (2 - 4/2) + 7" autocomplete="off" />
+      <button id="evalBtn" class="primary">Evaluate &amp; Visualize</button>
+      <button id="playBtn">▶ Play</button>
+      <button id="pauseBtn">⏸ Pause</button>
+      <button id="stepBtn">⏭ Step</button>
+      <button id="resetAnimBtn">⟲ Reset</button>
+      <button id="exportBtn" title="Export AST as PNG">⤓ Export PNG</button>
+    </div>
+  </header>
+
+  <main>
+    <aside class="history-col">
+      <div class="aside-header">
+        <strong>History</strong>
+        <button id="clearHistory" class="ghost" title="Clear history">Clear</button>
+      </div>
+      <div id="history" class="history"></div>
+      <div class="aside-footer">
+        <span class="chip">Tip: Click a history item to reload its AST</span>
+      </div>
+    </aside>
+
+    <section>
+      <div class="toolbar">
+        <span class="chip">Operators: + − × ÷ with parentheses</span>
+        <span class="chip">Evaluation: Post-order</span>
+        <span class="chip">Animation: highlights, TAC, stack</span>
+      </div>
+      <div class="result">Result: <strong id="result">—</strong> <span id="status" class="chip"></span></div>
+      <div id="ast-wrap" style="position:relative;">
+        <div id="ast-graph"></div>
+        <div class="legend">Green = literal • Blue = operator • Amber ring = evaluating</div>
+      </div>
+    </section>
+
+    <aside class="right-col">
+      <div class="panel" id="tac-panel">
+        <h4>Three-Address Code (TAC)</h4>
+        <div id="tac-list" class="tac-list"></div>
+      </div>
+      <div class="panel" id="stack-panel">
+        <h4>Evaluation Stack (Top → Bottom)</h4>
+        <div id="stack" class="stack"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="script.js"></script>
+  <script>
+    // Shows a message if script.js is missing or has an error, instead of silently dead buttons.
+    if (!window.appLoaded) {
+      const box = document.getElementById('load-error');
+      box.textContent = 'script.js did not load or has an error. Make sure script.js is in the same folder as index.html (lowercase name), then press F12 → Console to see the error.';
+      box.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
